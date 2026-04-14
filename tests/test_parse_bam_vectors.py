@@ -531,6 +531,30 @@ def test_read_vectors_from_hdf5_rejects_subset_without_n_or_frac(tmp_path):
         )
 
 
+def test_read_vectors_from_hdf5_rejects_non_dict_subset_parameters(tmp_path):
+    input_txt = tmp_path / "extract.txt"
+    output_h5 = tmp_path / "reads_thresholded.h5"
+    _write_extract_file(input_txt)
+
+    parse_bam.read_by_base_txt_to_hdf5(
+        input_txt=input_txt,
+        output_h5=output_h5,
+        motif="A,0",
+        thresh=0.5,
+        quiet=True,
+    )
+
+    with pytest.raises(ValueError, match="provided as a dictionary"):
+        load_processed.read_vectors_from_hdf5(
+            file=output_h5,
+            motifs=["A,0"],
+            regions="chr1:95-110",
+            subset_parameters=1,
+            calculate_mod_fractions=False,
+            quiet=True,
+        )
+
+
 def test_read_vectors_from_hdf5_rejects_subset_with_array_key(tmp_path):
     input_txt = tmp_path / "extract.txt"
     output_h5 = tmp_path / "reads_thresholded.h5"
@@ -553,6 +577,34 @@ def test_read_vectors_from_hdf5_rejects_subset_with_array_key(tmp_path):
             calculate_mod_fractions=False,
             quiet=True,
         )
+
+
+def test_read_vectors_from_hdf5_accepts_tuple_sort_by(tmp_path):
+    input_txt = tmp_path / "extract.txt"
+    output_h5 = tmp_path / "reads_thresholded.h5"
+    _write_extract_file(input_txt)
+
+    parse_bam.read_by_base_txt_to_hdf5(
+        input_txt=input_txt,
+        output_h5=output_h5,
+        motif="A,0",
+        thresh=0.5,
+        quiet=True,
+    )
+
+    read_tuples, datasets, _ = load_processed.read_vectors_from_hdf5(
+        file=output_h5,
+        motifs=["A,0"],
+        sort_by=("read_start", "desc"),
+        calculate_mod_fractions=False,
+        quiet=True,
+    )
+
+    read_name_index = datasets.index("read_name")
+    assert [read_tuple[read_name_index] for read_tuple in read_tuples] == [
+        "read_no_hits",
+        "read_sparse",
+    ]
 
 
 def test_readwise_binary_modification_arrays_passes_subset_and_quiet(monkeypatch):
