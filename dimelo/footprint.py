@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from hmmlearn.hmm import CategoricalHMM
+from scipy.stats import beta as _beta_dist
 
 _EPS = 1e-6
 
@@ -287,6 +288,100 @@ def call_footprints(
                 {"read_index": i, "footprint_present": True, "n_observed": n_observed, **best}
             )
     return pd.DataFrame(rows, columns=columns), hmm
+
+
+def annotate_clusters_by_footprint(
+    reads: np.ndarray,
+    labels,
+    *,
+    anchor_index: int,
+    val: np.ndarray | None = None,
+    hmm: BernoulliHMM | None = None,
+    min_width: int = 3,
+    max_width: int | None = None,
+    anchor_tolerance: int = 2,
+    prior_alpha: float = 0.5,
+    prior_beta: float = 0.5,
+    credible_mass: float = 0.95,
+) -> pd.DataFrame:
+    """Annotate single-molecule clusters with their footprint character (Q5).
+
+    Scores footprints on the per-read window matrix and groups the calls by the existing
+    cluster ``labels`` (aligned to ``reads`` row order, e.g. from
+    ``cluster.extract_read_windows`` + ``bernoulli_mixture``) — the clusters are defined by
+    the clustering, this only labels them. One shared HMM is fit on all reads (unless
+    ``hmm`` is given) so a cluster's footprint is not defined by a model refit to itself.
+
+    ``reads`` is a ``(n_reads, n_positions)`` binary methylation matrix (nan = missing),
+    ``anchor_index`` the motif-center column. If ``val`` (the coverage matrix, e.g.
+    ``ReadWindowExtractionResult.val_matrix``) is given, positions with ``val <= 0`` are
+    masked to nan so *uncovered* positions are not misread as protected.
+
+    Returns one row per cluster: ``cluster, n_reads, n_footprint, footprint_rate,
+    footprint_rate_ci_low, footprint_rate_ci_high, mean_protected_width,
+    mean_footprint_score`` (footprint_rate with a Beta-Binomial posterior credible interval,
+    default Jeffreys prior).
+    """
+    reads = np.asarray(reads, dtype=float)
+    labels = np.asarray(labels)
+    if reads.ndim != 2:
+        raise ValueError("reads must be a 2D (n_reads, n_positions) array.")
+    if len(labels) != reads.shape[0]:
+        raise ValueError("labels must be aligned to reads (one label per read).")
+    if not 0.0 < credible_mass < 1.0:
+        raise ValueError("credible_mass must be in the open interval (0, 1).")
+    if val is not None:
+        val = np.asarray(val, dtype=float)
+        if val.shape != reads.shape:
+            raise ValueError("val must have the same shape as reads.")
+        reads = np.where(val > 0, reads, np.nan)
+
+    table, _ = call_footprints(
+        reads,
+        anchor_index=anchor_index,
+        hmm=hmm,
+        min_width=min_width,
+        max_width=max_width,
+        anchor_tolerance=anchor_tolerance,
+    )
+    table = table.copy()
+    table["cluster"] = labels
+
+    columns = [
+        "cluster",
+        "n_reads",
+        "n_footprint",
+        "footprint_rate",
+        "footprint_rate_ci_low",
+        "footprint_rate_ci_high",
+        "mean_protected_width",
+        "mean_footprint_score",
+    ]
+    lower_quantile = (1.0 - credible_mass) / 2.0
+    rows: list[dict[str, object]] = []
+    for cluster, group in table.groupby("cluster", sort=False):
+        n_reads = len(group)
+        footprinted = group["footprint_present"].astype(bool)
+        n_footprint = int(footprinted.sum())
+        a_post = prior_alpha + n_footprint
+        b_post = prior_beta + (n_reads - n_footprint)
+        widths = group.loc[footprinted, "protected_width"]
+        scores = group.loc[footprinted, "footprint_score"]
+        rows.append(
+            {
+                "cluster": cluster,
+                "n_reads": n_reads,
+                "n_footprint": n_footprint,
+                "footprint_rate": n_footprint / n_reads if n_reads else float("nan"),
+                "footprint_rate_ci_low": float(_beta_dist.ppf(lower_quantile, a_post, b_post)),
+                "footprint_rate_ci_high": float(
+                    _beta_dist.ppf(1.0 - lower_quantile, a_post, b_post)
+                ),
+                "mean_protected_width": float(widths.mean()) if len(widths) else float("nan"),
+                "mean_footprint_score": float(scores.mean()) if len(scores) else float("nan"),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
 
 
 def aggregate_footprint_profile(

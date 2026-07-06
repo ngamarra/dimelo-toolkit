@@ -173,6 +173,58 @@ def test_call_footprints_validates_inputs():
     assert empty.empty
 
 
+def test_annotate_clusters_by_footprint_labels_states():
+    # cluster 0 = footprinted reads (protected center), cluster 1 = open reads (all methylated)
+    footprinted = np.tile(np.array([1.0] * 5 + [0.0] * 5 + [1.0] * 5), (15, 1))
+    open_reads = np.ones((10, 15))
+    reads = np.vstack([footprinted, open_reads])
+    labels = np.array([0] * 15 + [1] * 10)
+
+    annotation = footprint.annotate_clusters_by_footprint(
+        reads, labels, anchor_index=7, min_width=3
+    ).set_index("cluster")
+
+    assert annotation.loc[0, "n_reads"] == 15
+    assert annotation.loc[0, "footprint_rate"] > 0.8  # footprinted state
+    assert annotation.loc[1, "footprint_rate"] < 0.2  # open state
+    assert annotation.loc[0, "mean_protected_width"] == pytest.approx(5.0)
+    # Beta-posterior credible interval brackets the rate and is in [0, 1]
+    assert 0.0 <= annotation.loc[0, "footprint_rate_ci_low"] <= annotation.loc[
+        0, "footprint_rate_ci_high"
+    ] <= 1.0
+
+
+def test_annotate_clusters_by_footprint_masks_uncovered_positions():
+    # a "footprinted-looking" read whose anchor region is actually UNCOVERED (val=0) must
+    # not be counted as footprinted once the coverage mask is applied.
+    reads = np.tile(np.array([1.0] * 5 + [0.0] * 5 + [1.0] * 5), (12, 1))
+    val = np.ones_like(reads)
+    val[:, 5:10] = 0  # center (incl. anchor 7) uncovered
+    labels = np.zeros(12, dtype=int)
+
+    without_mask = footprint.annotate_clusters_by_footprint(
+        reads, labels, anchor_index=7, min_width=3
+    )
+    with_mask = footprint.annotate_clusters_by_footprint(
+        reads, labels, anchor_index=7, min_width=3, val=val
+    )
+    assert without_mask.loc[0, "footprint_rate"] > 0.8
+    # masking the uncovered anchor region drops the footprint calls
+    assert with_mask.loc[0, "footprint_rate"] == pytest.approx(0.0)
+
+
+def test_annotate_clusters_by_footprint_validates():
+    reads = np.ones((4, 10))
+    with pytest.raises(ValueError, match="aligned to reads"):
+        footprint.annotate_clusters_by_footprint(
+            reads, np.array([0, 1]), anchor_index=5
+        )
+    with pytest.raises(ValueError, match="same shape"):
+        footprint.annotate_clusters_by_footprint(
+            reads, np.zeros(4), anchor_index=5, val=np.ones((4, 5))
+        )
+
+
 def test_footprint_profile_plotting():
     import matplotlib
 
