@@ -77,3 +77,18 @@ pileup_0.2.4.bed.gz
 pileup_0.2.4_test.bed
 pileup_0.2.4_test.bed.gz
 pileup_0.6.1.bed.gz
+
+# Internal development planning and generated benchmark output.
+# These leaked into streetslab#121 (42 + 10 files) and must never enter a PR.
+docs/superpowers/
+docs/benchmarks/results/
+.vscode/
+
+# Local analysis droppings in the repo root
+output/
+region_clusters.bed
+*.fasta.fai
+
+# Example run output (keep the scripts, drop the results and job logs)
+examples/**/out/
+examples/**/*.out
