@@ -70,7 +70,12 @@ def _load_regions(regions: str | Path | pd.DataFrame | Sequence[Any]) -> pd.Data
     if isinstance(regions, pd.DataFrame):
         df = regions.copy()
         # Tolerate a few common column spellings.
-        ren = {"chrom": "chromosome", "chr": "chromosome", "chromStart": "start", "chromEnd": "end"}
+        ren = {
+            "chrom": "chromosome",
+            "chr": "chromosome",
+            "chromStart": "start",
+            "chromEnd": "end",
+        }
         df = df.rename(columns={k: v for k, v in ren.items() if k in df.columns})
         if "strand" not in df.columns:
             df["strand"] = "+"
@@ -100,7 +105,11 @@ def _load_regions(regions: str | Path | pd.DataFrame | Sequence[Any]) -> pd.Data
     df["start"] = df["start"].astype(int)
     df["end"] = df["end"].astype(int)
     df["region_id"] = (
-        df["chromosome"].astype(str) + ":" + df["start"].astype(str) + "-" + df["end"].astype(str)
+        df["chromosome"].astype(str)
+        + ":"
+        + df["start"].astype(str)
+        + "-"
+        + df["end"].astype(str)
     )
     return df.reset_index(drop=True)
 
@@ -145,7 +154,7 @@ class TrackWindows:
     def n_regions(self) -> int:
         return self.matrix.shape[0]
 
-    def subset(self, mask: Sequence[bool] | np.ndarray) -> "TrackWindows":
+    def subset(self, mask: Sequence[bool] | np.ndarray) -> TrackWindows:
         """Return a new TrackWindows keeping only rows where ``mask`` is True."""
         m = np.asarray(mask, dtype=bool)
         return TrackWindows(
@@ -255,11 +264,13 @@ def read_bigwig_windows(
                 vals = np.array([np.nan if v is None else v for v in vals], dtype=float)
                 # map bin centers of the sub-window onto the full-window bin grid
                 sub_centers = cs + (np.arange(nb) + 0.5) * (ce - cs) / nb
-                full_idx = np.clip(((sub_centers - s) / span * n_bins).astype(int), 0, n_bins - 1)
+                full_idx = np.clip(
+                    ((sub_centers - s) / span * n_bins).astype(int), 0, n_bins - 1
+                )
                 mat[i, full_idx] = vals
             else:
                 vals = np.array(bw.values(chrom, cs, ce), dtype=float)  # NaN for gaps
-                mat[i, (cs - s):(cs - s) + len(vals)] = vals
+                mat[i, (cs - s) : (cs - s) + len(vals)] = vals
             if orientation_aware and row["strand"] == "-":
                 mat[i, :] = mat[i, ::-1]
 
@@ -341,8 +352,14 @@ def metaprofile(
         err = _smooth(err, smooth_bp)
         out.append(
             pd.DataFrame(
-                {"position": tw.positions, "group": g, "mean": mean,
-                 "lo": mean - err, "hi": mean + err, "n": n}
+                {
+                    "position": tw.positions,
+                    "group": g,
+                    "mean": mean,
+                    "lo": mean - err,
+                    "hi": mean + err,
+                    "n": n,
+                }
             )
         )
     return pd.concat(out, ignore_index=True)
@@ -365,12 +382,19 @@ def site_labels_from_reads(
     column. ``agg`` is any pandas groupby-agg name ('mean','median','max',
     'first', ...); use 'first' for categorical labels.
     """
-    md = pd.DataFrame(list(metadata)) if not isinstance(metadata, pd.DataFrame) else metadata.copy()
+    md = (
+        pd.DataFrame(list(metadata))
+        if not isinstance(metadata, pd.DataFrame)
+        else metadata.copy()
+    )
     md = md.reset_index(drop=True)
     md["_value"] = np.asarray(values)
     md["region_id"] = (
-        md[region_key[0]].astype(str) + ":" + md[region_key[1]].astype(int).astype(str)
-        + "-" + md[region_key[2]].astype(int).astype(str)
+        md[region_key[0]].astype(str)
+        + ":"
+        + md[region_key[1]].astype(int).astype(str)
+        + "-"
+        + md[region_key[2]].astype(int).astype(str)
     )
     g = md.groupby("region_id")["_value"].agg([agg, "size"])
     g.columns = ["value", "n_reads"]
@@ -429,9 +453,21 @@ def plot_track_metaprofile(
     mp = metaprofile(tw, groups=groups, error=error, smooth_bp=smooth_bp)
     for g, sub in mp.groupby("group"):
         color = None if palette is None else palette.get(g)
-        line, = ax.plot(sub["position"], sub["mean"], label=f"{g} (n={int(sub['n'].max())})", color=color)
+        (line,) = ax.plot(
+            sub["position"],
+            sub["mean"],
+            label=f"{g} (n={int(sub['n'].max())})",
+            color=color,
+        )
         if error:
-            ax.fill_between(sub["position"], sub["lo"], sub["hi"], color=line.get_color(), alpha=0.2, lw=0)
+            ax.fill_between(
+                sub["position"],
+                sub["lo"],
+                sub["hi"],
+                color=line.get_color(),
+                alpha=0.2,
+                lw=0,
+            )
     ax.axvline(0, color="k", lw=0.8, ls=":")
     ax.set_xlabel("position relative to site center (bp)")
     ax.set_ylabel(ylabel or tw.track_name)
@@ -475,8 +511,13 @@ def plot_track_heatmap(
     if vmax is None:
         vmax = np.nanpercentile(mat, 98)
     im = ax.imshow(
-        mat, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax,
-        extent=[tw.positions[0], tw.positions[-1], tw.n_regions, 0], interpolation="nearest",
+        mat,
+        aspect="auto",
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        extent=[tw.positions[0], tw.positions[-1], tw.n_regions, 0],
+        interpolation="nearest",
     )
     ax.axvline(0, color="w", lw=0.8, ls=":")
     ax.set_xlabel("position relative to site center (bp)")
@@ -518,7 +559,9 @@ class PhasingResult:
     nrl_autocorr: float | None
 
 
-def _autocorr_nrl(profile: np.ndarray, bin_bp: float, min_lag_bp: float, max_lag_bp: float):
+def _autocorr_nrl(
+    profile: np.ndarray, bin_bp: float, min_lag_bp: float, max_lag_bp: float
+):
     """Autocorrelation of a detrended profile; return (lags_bp, acf, first-peak-lag)."""
     v = np.asarray(profile, dtype=float)
     v = v[~np.isnan(v)]
@@ -526,7 +569,7 @@ def _autocorr_nrl(profile: np.ndarray, bin_bp: float, min_lag_bp: float, max_lag
         return np.array([]), np.array([]), None
     v = v - v.mean()
     full = np.correlate(v, v, mode="full")
-    acf = full[full.size // 2:]
+    acf = full[full.size // 2 :]
     acf = acf / acf[0] if acf[0] != 0 else acf
     lags_bp = np.arange(acf.size) * bin_bp
     lo = max(1, int(round(min_lag_bp / bin_bp)))
@@ -572,13 +615,22 @@ def _phasing_from_profile(
     plus1 = float(pos_peaks[0]) if pos_peaks.size else None
     minus1 = float(neg_peaks[-1]) if neg_peaks.size else None
     ndr_width = (plus1 - minus1) if (plus1 is not None and minus1 is not None) else None
-    nrl_peaks = float(np.median(np.diff(np.sort(peak_pos)))) if peak_pos.size >= 2 else None
+    nrl_peaks = (
+        float(np.median(np.diff(np.sort(peak_pos)))) if peak_pos.size >= 2 else None
+    )
 
     lags, acf, nrl_ac = _autocorr_nrl(profile, bin_bp, min_lag_bp, max_lag_bp)
     return PhasingResult(
-        positions=positions, profile=profile, peak_positions=peak_pos,
-        plus1=plus1, minus1=minus1, ndr_width=ndr_width, nrl_peaks=nrl_peaks,
-        autocorr_lags=lags, autocorr=acf, nrl_autocorr=nrl_ac,
+        positions=positions,
+        profile=profile,
+        peak_positions=peak_pos,
+        plus1=plus1,
+        minus1=minus1,
+        ndr_width=ndr_width,
+        nrl_peaks=nrl_peaks,
+        autocorr_lags=lags,
+        autocorr=acf,
+        nrl_autocorr=nrl_ac,
     )
 
 
@@ -608,8 +660,12 @@ def nucleosome_phasing(
         prof = tw.subset(groups == g).mean_profile()
         prof = _smooth(prof, smooth_bp)
         out[g] = _phasing_from_profile(
-            tw.positions, prof, min_distance_bp=min_distance_bp, prominence=prominence,
-            min_lag_bp=min_lag_bp, max_lag_bp=max_lag_bp,
+            tw.positions,
+            prof,
+            min_distance_bp=min_distance_bp,
+            prominence=prominence,
+            min_lag_bp=min_lag_bp,
+            max_lag_bp=max_lag_bp,
         )
     return out
 
@@ -634,14 +690,23 @@ def plot_dyad_phasing(
 
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 3.4))
-    phas = nucleosome_phasing(tw, groups=groups, smooth_bp=smooth_bp, min_distance_bp=min_distance_bp)
+    phas = nucleosome_phasing(
+        tw, groups=groups, smooth_bp=smooth_bp, min_distance_bp=min_distance_bp
+    )
     for g, pr in phas.items():
         color = None if palette is None else palette.get(g)
-        line, = ax.plot(pr.positions, pr.profile, label=str(g), color=color)
+        (line,) = ax.plot(pr.positions, pr.profile, label=str(g), color=color)
         if mark_peaks and pr.peak_positions.size:
             yv = np.interp(pr.peak_positions, pr.positions, pr.profile)
-            ax.scatter(pr.peak_positions, yv, s=22, color=line.get_color(), zorder=5,
-                       edgecolor="k", linewidth=0.3)
+            ax.scatter(
+                pr.peak_positions,
+                yv,
+                s=22,
+                color=line.get_color(),
+                zorder=5,
+                edgecolor="k",
+                linewidth=0.3,
+            )
     ax.axvline(0, color="k", lw=0.8, ls=":")
     ax.set_xlabel("position relative to site center (bp)")
     ax.set_ylabel(ylabel or f"{tw.track_name} (dyad density)")
@@ -692,11 +757,19 @@ def overlay_track_with_reads(
         )
 
     fig, (ax_t, ax_m) = plt.subplots(
-        2, 1, figsize=(7, 5.4), sharex=True, gridspec_kw={"height_ratios": [1, 1], "hspace": 0.08}
+        2,
+        1,
+        figsize=(7, 5.4),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1, 1], "hspace": 0.08},
     )
     plot_track_metaprofile(
-        tw, groups=site_groups, smooth_bp=smooth_bp, ax=ax_t,
-        palette=palette, ylabel=track_label or tw.track_name,
+        tw,
+        groups=site_groups,
+        smooth_bp=smooth_bp,
+        ax=ax_t,
+        palette=palette,
+        ylabel=track_label or tw.track_name,
     )
     ax_t.set_xlabel("")
 
@@ -708,7 +781,12 @@ def overlay_track_with_reads(
         prof = read_pileup(data_matrix, val_matrix, rows=np.where(read_groups == g)[0])
         prof = _smooth(prof, smooth_bp)
         color = None if palette is None else palette.get(g)
-        ax_m.plot(read_positions, prof, label=f"{g} (n={int(np.sum(read_groups == g))})", color=color)
+        ax_m.plot(
+            read_positions,
+            prof,
+            label=f"{g} (n={int(np.sum(read_groups == g))})",
+            color=color,
+        )
     ax_m.axvline(0, color="k", lw=0.8, ls=":")
     ax_m.set_xlabel("position relative to site center (bp)")
     ax_m.set_ylabel(mod_label)

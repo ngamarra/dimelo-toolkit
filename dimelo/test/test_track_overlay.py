@@ -35,8 +35,13 @@ def test_read_windows_center_and_orientation():
         _make_bigwig(bwp)
         center = 10000
         # A '+' and a '-' region at the same center; ramp value == coordinate.
-        regions = [("chr1", center - 5, center + 5, "+"), ("chr1", center - 5, center + 5, "-")]
-        tw = tov.read_bigwig_windows(bwp, regions, window_size=100, orientation_aware=True)
+        regions = [
+            ("chr1", center - 5, center + 5, "+"),
+            ("chr1", center - 5, center + 5, "-"),
+        ]
+        tw = tov.read_bigwig_windows(
+            bwp, regions, window_size=100, orientation_aware=True
+        )
 
         assert tw.matrix.shape == (2, 201)  # inclusive window [-100, 100]
         # positions run -100..100; index of position 0 is 100.
@@ -83,15 +88,17 @@ def test_metaprofile_and_pileup():
     )
     mp = tov.metaprofile(tw, groups=["x", "x", "y"], error="sem")
     assert abs(mp[mp.group == "x"]["mean"].iloc[0] - 2.0) < 1e-9  # mean(1,3)=2
-    assert np.isnan(mp[mp.group == "y"]["mean"].iloc[0])          # all-NaN group
+    assert np.isnan(mp[mp.group == "y"]["mean"].iloc[0])  # all-NaN group
 
     # read_pileup: valid-weighted fraction methylated
     data = np.array([[1, 0, 1], [1, 1, 0]], dtype=float)
     val = np.array([[1, 1, 1], [1, 0, 1]], dtype=float)  # read2 pos1 = no-data
     prof = tov.read_pileup(data, val)
-    assert abs(prof[0] - 1.0) < 1e-9   # both reads methylated, both valid
-    assert abs(prof[1] - 0.0) < 1e-9   # only read1 informative (val=1), and it is unmethylated
-    assert abs(prof[2] - 0.5) < 1e-9   # read1=1, read2=0, both valid
+    assert abs(prof[0] - 1.0) < 1e-9  # both reads methylated, both valid
+    assert (
+        abs(prof[1] - 0.0) < 1e-9
+    )  # only read1 informative (val=1), and it is unmethylated
+    assert abs(prof[2] - 0.5) < 1e-9  # read1=1, read2=0, both valid
     print("ok: metaprofile + pileup")
 
 
@@ -125,7 +132,7 @@ if __name__ == "__main__":
         import pyBigWig  # noqa: F401
     except Exception:
         print("SKIP: pyBigWig not installed")
-        raise SystemExit(0)
+        raise SystemExit(0) from None
     test_read_windows_center_and_orientation()
     test_binned_matches_perbp_mean()
     test_metaprofile_and_pileup()

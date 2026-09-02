@@ -33,38 +33,61 @@ SCR = Path("/scratch/users/ngamarra/hiref_h3_mnase_chip/bigwig")
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dyad-bw", default=str(SCR / "Input.chm13v2.dyad_mono.5bp.cpm.bw"))
-    ap.add_argument("--peak-bed", default=str(FORK / "dimelo/test/data/ctcf_demo_peak.bed"))
+    ap.add_argument(
+        "--dyad-bw", default=str(SCR / "Input.chm13v2.dyad_mono.5bp.cpm.bw")
+    )
+    ap.add_argument(
+        "--peak-bed", default=str(FORK / "dimelo/test/data/ctcf_demo_peak.bed")
+    )
     ap.add_argument("--random-bed", default=str(DATA / "random_sites.bed"))
-    ap.add_argument("--strength-tsv", default=str(DEMO / "out" / "per_site_binding_strength.tsv"))
+    ap.add_argument(
+        "--strength-tsv", default=str(DEMO / "out" / "per_site_binding_strength.tsv")
+    )
     ap.add_argument("--window", type=int, default=1000)
     ap.add_argument("--bins", type=int, default=400)
     ap.add_argument("--zoom", type=int, default=500)
     ap.add_argument("--out", default=str(DEMO / "out" / "fig5_dyad_focus.png"))
     args = ap.parse_args()
 
-    PAL = {"CTCF peak": "tab:red", "random": "0.5", "high binding": "tab:red", "low binding": "tab:blue"}
+    PAL = {
+        "CTCF peak": "tab:red",
+        "random": "0.5",
+        "high binding": "tab:red",
+        "low binding": "tab:blue",
+    }
 
     # per-site binding strength -> high/low split
     st = pd.read_csv(args.strength_tsv, sep="\t")
     strength = dict(zip(st["region_id"], st["binding_strength"]))
     thr = st["binding_strength"].median()
 
-    peak = tov.read_bigwig_windows(args.dyad_bw, args.peak_bed, window_size=args.window, n_bins=args.bins)
-    rand = tov.read_bigwig_windows(args.dyad_bw, args.random_bed, window_size=args.window, n_bins=args.bins)
+    peak = tov.read_bigwig_windows(
+        args.dyad_bw, args.peak_bed, window_size=args.window, n_bins=args.bins
+    )
+    rand = tov.read_bigwig_windows(
+        args.dyad_bw, args.random_bed, window_size=args.window, n_bins=args.bins
+    )
 
     def _concat(a, b):
         import copy
+
         o = copy.copy(a)
         o.matrix = np.vstack([a.matrix, b.matrix])
         for f in ("region_ids", "chromosomes", "starts", "ends", "strands"):
-            setattr(o, f, np.concatenate([np.asarray(getattr(a, f)), np.asarray(getattr(b, f))]))
+            setattr(
+                o,
+                f,
+                np.concatenate([np.asarray(getattr(a, f)), np.asarray(getattr(b, f))]),
+            )
         return o
 
     pr_tw = _concat(peak, rand)
     pr_grp = np.array(["CTCF peak"] * peak.n_regions + ["random"] * rand.n_regions)
-    hilo = np.where(pd.Series(peak.region_ids).map(strength).fillna(0).to_numpy() >= thr,
-                    "high binding", "low binding")
+    hilo = np.where(
+        pd.Series(peak.region_ids).map(strength).fillna(0).to_numpy() >= thr,
+        "high binding",
+        "low binding",
+    )
 
     def annotate(ax, phas, key):
         """Mark +1 dyad and print +1/NDR/NRL for the CTCF/high-binding group."""
@@ -81,21 +104,42 @@ def main() -> None:
         if pr.nrl_autocorr is not None:
             txt.append(f"NRL ≈ {pr.nrl_autocorr:.0f} bp")
         if txt:
-            ax.text(0.02, 0.97, "\n".join(txt), transform=ax.transAxes, va="top", ha="left",
-                    fontsize=8, bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.85))
+            ax.text(
+                0.02,
+                0.97,
+                "\n".join(txt),
+                transform=ax.transAxes,
+                va="top",
+                ha="left",
+                fontsize=8,
+                bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.85),
+            )
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 7), sharex="row")
-    for col, (tw, grp, mainkey, ttl) in enumerate([
-        (pr_tw, pr_grp, "CTCF peak", "Input MNase dyads: CTCF peak vs random"),
-        (peak, hilo, "high binding", "Input MNase dyads: high vs low binding CTCF"),
-    ]):
-        _, ph = tov.plot_dyad_phasing(tw, groups=grp, smooth_bp=15, ax=axes[0][col], palette=PAL, title=ttl)
+    for col, (tw, grp, mainkey, ttl) in enumerate(
+        [
+            (pr_tw, pr_grp, "CTCF peak", "Input MNase dyads: CTCF peak vs random"),
+            (peak, hilo, "high binding", "Input MNase dyads: high vs low binding CTCF"),
+        ]
+    ):
+        _, ph = tov.plot_dyad_phasing(
+            tw, groups=grp, smooth_bp=15, ax=axes[0][col], palette=PAL, title=ttl
+        )
         annotate(axes[0][col], ph, mainkey)
         # zoom row reuses the same profiles/peaks
-        tov.plot_dyad_phasing(tw, groups=grp, smooth_bp=15, ax=axes[1][col], palette=PAL,
-                              title=f"{ttl.split(':')[1].strip()} (zoom ±{args.zoom} bp)")
+        tov.plot_dyad_phasing(
+            tw,
+            groups=grp,
+            smooth_bp=15,
+            ax=axes[1][col],
+            palette=PAL,
+            title=f"{ttl.split(':')[1].strip()} (zoom ±{args.zoom} bp)",
+        )
         axes[1][col].set_xlim(-args.zoom, args.zoom)
-    fig.suptitle("Fine-grained nucleosome dyad positioning relative to CTCF (mono-nucleosome, 5 bp)", y=1.0)
+    fig.suptitle(
+        "Fine-grained nucleosome dyad positioning relative to CTCF (mono-nucleosome, 5 bp)",
+        y=1.0,
+    )
     fig.tight_layout()
     fig.savefig(args.out, dpi=150)
     print(f"[done] wrote {args.out}")
