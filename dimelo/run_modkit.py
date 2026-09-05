@@ -6,9 +6,11 @@ import os
 import pty
 import re
 import select
+import shlex
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -297,6 +299,7 @@ def run_with_progress_bars(
     err_str: str = "Error",
     expect_done: bool = False,
     quiet: bool = False,
+    stall_timeout: float | None = 1800.0,
 ) -> str:
     r"""
     This function runs modkit with subprocess / pseudoterminal and grabs the progress outputs to populate progress bars
@@ -374,6 +377,17 @@ def run_with_progress_bars(
     master_fd, slave_fd = pty.openpty()
 
     # Start modkit subprocess with the slave end as stdio
+    # Set DIMELO_DEBUG_MODKIT_CMD=1 to echo the exact modkit invocation. The progress-bar
+    # wrapper swallows the command, which makes version-specific CLI problems very hard to
+    # reproduce by hand; this makes the failing command copy-pasteable.
+    if os.environ.get("DIMELO_DEBUG_MODKIT_CMD"):
+        print(
+            "[dimelo] modkit command: "
+            + " ".join(shlex.quote(str(part)) for part in command_list),
+            file=sys.stderr,
+            flush=True,
+        )
+
     process = subprocess.Popen(
         command_list,
         stdin=slave_fd,
@@ -388,15 +402,48 @@ def run_with_progress_bars(
     region_parsing_started = False
 
     # Grab output bytes for as long as they're coming
+    #
+    # Two exit conditions beyond EOF/EIO on the pty are required for correctness:
+    #
+    #  1. The child may exit without this loop ever observing EOF. A pty master does
+    #     not reliably report EOF when the slave side closes, so without a poll() check
+    #     `select` simply times out every `poll_interval` forever and the loop spins with
+    #     no progress. This is not hypothetical: it hangs
+    #     `dimelo_test.py::TestParseToPlot::test_unit__pileup[megalodon_peaks_190]`
+    #     indefinitely via the multi-motif split-pileup path in parse_bam.pileup.
+    #  2. A wall-clock guard, so a genuinely stuck child surfaces as an error with the
+    #     captured tail rather than consuming the whole job allocation silently.
+    poll_interval = 0.1
+    start_time = time.monotonic()
     while True:
         # Wait for the process to be ready to provide bytes
-        ready, _, _ = select.select([master_fd], [], [], 0.1)
+        ready, _, _ = select.select([master_fd], [], [], poll_interval)
+        if not ready:
+            # Nothing pending. If the child is gone, drain is complete -- stop.
+            if process.poll() is not None:
+                break
+            if (
+                stall_timeout is not None
+                and time.monotonic() - start_time > stall_timeout
+            ):
+                process.kill()
+                process.wait()
+                raise subprocess.TimeoutExpired(
+                    cmd=command_list,
+                    timeout=stall_timeout,
+                    output=tail_buffer,
+                )
+            continue
         if ready:
             try:
                 # Read a single byte
                 data = os.read(master_fd, 1)
                 if not data:
                     break  # No more data
+                # Bytes arrived, so the child is making progress: restart the stall
+                # clock. This keeps stall_timeout a no-output guard rather than a cap
+                # on total runtime, so legitimately long pileups are never killed.
+                start_time = time.monotonic()
 
                 if render_progress and not progress_bars_initialized:
                     pbar_pre = tqdm(
